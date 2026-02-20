@@ -61,7 +61,7 @@ An AI-powered pharmacogenomic decision support system that transforms raw geneti
 - JavaScript (ES6+) – Client-side logic
 - File Upload & FormData API – VCF handling
 
-Frontend runs on:
+Frontend runs on: After Clone
 http://localhost:5173
 
 
@@ -73,11 +73,11 @@ http://localhost:5173
 - MongoDB – NoSQL database
 - cyvcf2 – High-performance VCF parsing
 
-Backend runs on:
-
+Backend runs on: After Clone
 http://localhost:3000
 
 
+Deploy Link: https://pharma-guard-nine.vercel.app/
 ### 🔑 APIs
 - OpenAI API – LLM-powered clinical explanation generation
 
