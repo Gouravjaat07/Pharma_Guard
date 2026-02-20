@@ -1,57 +1,60 @@
-from openai import OpenAI
+import os
 import json
-from app.core.config import settings
 from openai import AsyncOpenAI
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-def fallback_response(drug_data):
-    return {
-        "biological_mechanism": drug_data.get("mechanism"),
-        "clinical_risk_summary": drug_data.get("whyRisk"),
-        "dosing_guideline": drug_data.get("dosage"),
-        "evidence_level": drug_data.get("cpic")
-    }
-
-
-def generate_clinical_explanation(drug_data, matched_variants):
-
-    if not settings.OPENAI_API_KEY:
-        return fallback_response(drug_data)
+async def generate_clinical_explanation(drug_data, matched_variants):
 
     prompt = f"""
-Generate STRICT JSON.
+You are a pharmacogenomics clinical decision support system.
 
-Fields:
-- biological_mechanism
-- clinical_risk_summary
-- dosing_guideline
-- evidence_level
+Return ONLY valid JSON.
+Do not add text outside JSON.
 
-Drug: {drug_data.get("name")}
-Gene: {drug_data.get("gene")}
-Diplotype: {drug_data.get("diplotype")}
-Phenotype: {drug_data.get("phenotype")}
-CPIC Level: {drug_data.get("cpic")}
-Detected Variants: {matched_variants}
+Format:
+{{
+  "summary": "...",
+  "why_this_risk": "...",
+  "clinical_recommendation": "...",
+  "references": ["CPIC", "FDA"]
+}}
 
-Return JSON only.
+Drug: {drug_data['name']}
+Gene: {drug_data.get('gene')}
+Phenotype: {drug_data.get('phenotype')}
+Risk Level: {drug_data.get('risk')}
+Matched Variants: {matched_variants}
 """
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a pharmacogenomics clinical expert."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
         )
 
-        raw_text = response.choices[0].message.content.strip()
-        return json.loads(raw_text)
+        content = response.choices[0].message.content.strip()
+
+        # Force clean JSON extraction
+        if content.startswith("```"):
+            content = content.split("```")[1]
+
+        parsed = json.loads(content)
+
+        return {
+            "summary": parsed.get("summary", ""),
+            "why_this_risk": parsed.get("why_this_risk", ""),
+            "clinical_recommendation": parsed.get("clinical_recommendation", ""),
+            "references": parsed.get("references", [])
+        }
 
     except Exception as e:
-        print("🔥 OPENAI ERROR:", e)
-        return fallback_response(drug_data)
+        print("LLM ERROR:", e)
+
+        return {
+            "summary": f"{drug_data['name']} pharmacogenomic interpretation based on {drug_data.get('gene')} profile.",
+            "why_this_risk": "No additional AI explanation available.",
+            "clinical_recommendation": drug_data.get("dosage", ""),
+            "references": []
+        }

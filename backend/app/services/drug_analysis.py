@@ -1,5 +1,6 @@
 from datetime import datetime
 from app.core.database import db
+from app.services.llm_service import generate_clinical_explanation
 
 
 async def run_analysis(file_info, drugs):
@@ -30,16 +31,15 @@ async def run_analysis(file_info, drugs):
         })
 
         if not db_drug:
+            print(f"⚠ Drug not found: {drug_name}")
             continue
 
-        # Convert ObjectId to string
+        # remove ObjectId safely
         db_drug["_id"] = str(db_drug["_id"])
 
-        # Variant matching
         drug_variants = db_drug.get("variants", [])
         matched_variants = list(set(patient_variants) & set(drug_variants))
 
-        # Risk logic
         if matched_variants:
             risk = db_drug.get("risk", "Low")
             severity = db_drug.get("severity", "Mild")
@@ -47,17 +47,18 @@ async def run_analysis(file_info, drugs):
             risk = "Low"
             severity = "Mild"
 
-        # Risk categorization
-        risk_lower = risk.lower()
-
-        if risk_lower == "high":
-            high_risk.append(drug_name)
-        elif risk_lower == "moderate":
-            adjust_dose.append(drug_name)
-        elif risk_lower == "low":
-            safe.append(drug_name)
+        # CALL OPENAI ONLY IF VARIANT MATCH
+        if matched_variants:
+            explanation = await generate_clinical_explanation(
+                db_drug,
+                matched_variants
+            )
         else:
-            ineffective.append(drug_name)
+            explanation = {
+                "summary": "No actionable pharmacogenomic variants detected.",
+                "why_this_risk": db_drug.get("whyRisk"),
+                "references": []
+            }
 
         drug_results[drug_name] = {
             "risk": risk,
@@ -74,8 +75,19 @@ async def run_analysis(file_info, drugs):
             "whyRisk": db_drug.get("whyRisk"),
             "variants": matched_variants,
             "geneImpact": db_drug.get("geneImpact"),
-            "category": db_drug.get("category")
+            "category": db_drug.get("category"),
+            "llm_generated_explanation": explanation
         }
+
+        # summary classification
+        if risk.lower() == "high":
+            high_risk.append(drug_name)
+        elif risk.lower() == "moderate":
+            adjust_dose.append(drug_name)
+        elif risk.lower() == "low":
+            safe.append(drug_name)
+        else:
+            ineffective.append(drug_name)
 
     result = {
         "sampleId": file_info.get("sampleId", "Unknown"),
@@ -95,7 +107,7 @@ async def run_analysis(file_info, drugs):
         }
     }
 
-    # Save clean copy
+    # SAVE CLEAN COPY (NO ObjectId returned)
     await db.analyses.insert_one(result.copy())
 
     return result
